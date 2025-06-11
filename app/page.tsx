@@ -440,12 +440,13 @@ const CodeEditorUI = () => {
   );
   useEffect(() => {
     setHighlightedCode(highlightSyntax(code));
-  }, [code, highlightSyntax]);
-  // ============================================================================
+  }, [code, highlightSyntax]); // ============================================================================
   // WEBSOCKET CONNECTION MANAGEMENT
   // ============================================================================
   // WebSocket connection
   useEffect(() => {
+    let simulationInterval: NodeJS.Timeout;
+
     const connectWebSocket = () => {
       try {
         // Mock WebSocket for demo - in production, replace with your WebSocket server
@@ -460,29 +461,17 @@ const CodeEditorUI = () => {
                   name: "Demo User",
                   color: "#4ecdc4",
                 };
-
                 if (message.type === "cursor") {
                   setCursors((prev) => {
                     const filtered = prev.filter((c) => c.id !== mockUser.id);
-                    // Position demo cursor on actual code content
-                    const codeLines = code.split("\n");
-                    const randomLine = Math.floor(
-                      Math.random() * Math.min(codeLines.length, 10)
-                    );
-                    const randomColumn = Math.floor(
-                      Math.random() *
-                        Math.min(codeLines[randomLine]?.length || 0, 20)
-                    );
-                    const position =
-                      codeLines.slice(0, randomLine).join("\n").length +
-                      (randomLine > 0 ? 1 : 0) +
-                      randomColumn;
+                    // Position demo cursor at a random position
+                    const randomPosition = Math.floor(Math.random() * 50);
 
                     return [
                       ...filtered,
                       {
                         id: mockUser.id,
-                        position: Math.max(0, position),
+                        position: Math.max(0, randomPosition),
                         color: mockUser.color,
                         user: mockUser.name,
                       },
@@ -493,7 +482,52 @@ const CodeEditorUI = () => {
             }
           },
           close: () => {},
-          onmessage: null,
+          onmessage: (event: Event) => {
+            // Handle incoming messages from other users
+            const messageEvent = event as MessageEvent;
+            try {
+              const message = JSON.parse(messageEvent.data) as Message;
+
+              // Handle incoming code changes from other users
+              if (
+                message.type === "code" &&
+                message.userId !== userId &&
+                message.content
+              ) {
+                // Apply incoming code changes to local state
+                setCode(message.content);
+
+                // Optional: Show a brief indicator that code was updated by another user
+                console.log(`Code updated by ${message.userId}`);
+              }
+
+              // Handle incoming cursor updates from other users
+              if (message.type === "cursor" && message.userId !== userId) {
+                setCursors((prev) => {
+                  const filtered = prev.filter((c) => c.id !== message.userId);
+
+                  // Use the color from the message or a default color
+                  if (typeof message.position === "number") {
+                    return [
+                      ...filtered,
+                      {
+                        id: message.userId,
+                        position: message.position,
+                        color: message.color || "#4ecdc4", // Default color
+                        user:
+                          message.userId === "mock-user-1"
+                            ? "Demo User"
+                            : message.userId,
+                      },
+                    ];
+                  }
+                  return filtered;
+                });
+              }
+            } catch (error) {
+              console.error("Error parsing incoming message:", error);
+            }
+          },
           onopen: null,
           onclose: null,
           onerror: null,
@@ -506,6 +540,45 @@ const CodeEditorUI = () => {
           { id: userId, name: "You", color: userColor },
           { id: "mock-user-1", name: "Demo User", color: "#4ecdc4" },
         ]);
+
+        // Simulate incoming messages from other users for demo
+        const simulateIncomingMessages = () => {
+          // Simulate a code change from another user every 10 seconds
+          simulationInterval = setInterval(() => {
+            if (Math.random() > 0.7) {
+              // 30% chance every 10 seconds
+              const demoCodeChanges = [
+                `<h1>Hello World</h1>\n<p>Demo User was here!</p>`,
+                `<h1>Collaborative Editing</h1>\n<p>This was updated by Demo User</p>`,
+                `<h1>Real-time Sync</h1>\n<p>Demo User made this change</p>\n<style>\nbody { background: #f0f0f0; }\n</style>`,
+              ];
+
+              const randomCode =
+                demoCodeChanges[
+                  Math.floor(Math.random() * demoCodeChanges.length)
+                ];
+
+              // Simulate receiving a message from another user
+              const mockMessage = {
+                type: "code" as const,
+                content: randomCode,
+                userId: "mock-user-1",
+                timestamp: Date.now(),
+              };
+
+              // Trigger the onmessage handler
+              if (mockWs.onmessage) {
+                const mockEvent = {
+                  data: JSON.stringify(mockMessage),
+                } as MessageEvent;
+                mockWs.onmessage(mockEvent);
+              }
+            }
+          }, 10000);
+        };
+
+        // Start simulating incoming messages after a delay
+        setTimeout(simulateIncomingMessages, 3000);
       } catch (error) {
         console.error("WebSocket connection failed:", error);
         setIsConnected(false);
@@ -518,8 +591,12 @@ const CodeEditorUI = () => {
       if (wsRef.current) {
         wsRef.current.close();
       }
+      // Clear the simulation interval to prevent memory leaks
+      if (simulationInterval) {
+        clearInterval(simulationInterval);
+      }
     };
-  }, [userId, userColor, code]);
+  }, [userId, userColor]); // Removed 'code' dependency to prevent infinite loops
 
   // ============================================================================
   // MESSAGE HANDLING
